@@ -148,7 +148,7 @@ def get_random_crop_testset(center,
         "overlay":overlay
     }
 
-# Pytorch dataset objects for trainset as well as Test set. 
+# Pytorch dataset objects for trainset as well as testset. 
 # Init functions differ, thus two different dataset class.
 # However, their output will be the same.
 class Trainset(Dataset):
