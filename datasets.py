@@ -10,14 +10,11 @@ from copy import deepcopy
 # Increase the pixel size limit
 Image.MAX_IMAGE_PIXELS = 1000000000  # Increase this value as needed
 
-# Random generator object 
-# This will be set manually later several times for reproducibility
-rng = np.random.default_rng()
 
 # Random Crop Generating Functions for testset "get_random_crop_coor_testset" and trainset "get_random_crop_coor_trainset"
 # Calculations needed are different, thus two different functions. 
 # But both function will output the same data structure for easier to management of data in the pipeline.
-def get_random_crop_coor_trainset(rgb_base_array,thermal_base_array, crop_size = 1536, patch_size = 512):
+def get_random_crop_coor_trainset(rgb_base_array,thermal_base_array, rng = np.random.default_rng(), crop_size = 1536, patch_size = 512):
     """
         Given two base images and patch and crop sizes (rgb, thermal, crop_size, patch_size)
         generates random rgb_crop with crop_size, and a random thermal_patch with patch_size
@@ -67,7 +64,8 @@ def get_random_crop_coor_trainset(rgb_base_array,thermal_base_array, crop_size =
 
 def get_random_crop_coor_testset(center, 
                              rgb_base_array, 
-                             thermal_patch, 
+                             thermal_patch,
+                             rng = np.random.default_rng(),
                              thermal_patch_size = 512, 
                              crop_size = 1536):
     """
@@ -201,8 +199,11 @@ class Trainset(Dataset):
                  num_samples = 1000, 
                  rgb_transforms = None, 
                  thermal_tranforms=None, 
+                 rng = np.random.default_rng(),
                  patch_size=512, 
                  crop_size=1536):
+        # set local random generator if provided.
+        self.rng = rng
         # Get image Convert RGB PIL image to numpy array
         self.rgb_base_array = np.array(Image.open(rgb_base_path).convert("RGB"))
         self.thermal_base_array = np.array(Image.open(thermal_base_path).convert("RGB")) 
@@ -227,6 +228,7 @@ class Trainset(Dataset):
         for item in range(self.num_samples):
             self.samples.append(get_random_crop_coor_trainset(self.rgb_base_array, 
                                                          self.thermal_base_array, 
+                                                         self.rng,
                                                          self.crop_size, 
                                                          self.patch_size)
                                )    
@@ -269,8 +271,11 @@ class Testset(Dataset):
                  num_samples = 1000,
                  rgb_transforms = None, 
                  thermal_tranforms=None, 
+                 rng = np.random.default_rng(),
                  patch_size=512, 
                  crop_size=1536):
+        # set local random generator
+        self.rng = rng
         # Get Image and Convert RGB PIL image to numpy array
         self.rgb_base_array = np.array(Image.open(rgb_base_path).convert("RGB"))
         # get thermal patches
@@ -297,10 +302,11 @@ class Testset(Dataset):
         # Iteratively generate random crops from the base images.
         for item in range(self.num_samples):
             # Randomly select a center to generate thermal patch with a random rgb crop.
-            idx = rng.integers(0,len(self.centers))
+            idx = self.rng.integers(0,len(self.centers))
             item = get_random_crop_coor_testset(self.centers[idx],
                                                         self.rgb_base_array, 
                                                         self.thermal_patches[idx], 
+                                                        self.rng,
                                                         thermal_patch_size = self.patch_size, 
                                                         crop_size = self.crop_size)
             item["item_id"] = idx
@@ -367,7 +373,8 @@ if __name__ == '__main__':
     sample_train_dataset = Trainset(
         rgb_base_path = "datasets/rgb_zone1.png",
         thermal_base_path = "datasets/thermal_zone1.png",
-        num_samples = 20
+        num_samples = 20,
+        rng = rng
     )
     
     sample_train_dataloader = DataLoader(sample_train_dataset,batch_size=10, drop_last=False, shuffle=True)
@@ -386,7 +393,8 @@ if __name__ == '__main__':
         rgb_base_path = "datasets/rgb_zone2.png",
         thermal_patches= thermal_patches,
         centers=centers,
-        num_samples = 20
+        num_samples = 20,
+        rng = rng
     )
     
     sample_test_dataloader = DataLoader(sample_test_dataset,batch_size=10, drop_last=False, shuffle=True)
