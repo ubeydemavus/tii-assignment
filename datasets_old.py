@@ -5,7 +5,6 @@ import torch
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 import warnings
-from copy import deepcopy
 
 # Increase the pixel size limit
 Image.MAX_IMAGE_PIXELS = 1000000000  # Increase this value as needed
@@ -14,73 +13,90 @@ Image.MAX_IMAGE_PIXELS = 1000000000  # Increase this value as needed
 # This will be set manually later several times for reproducibility
 rng = np.random.default_rng()
 
-# Random Crop Generating Functions for testset "get_random_crop_coor_testset" and trainset "get_random_crop_coor_trainset"
+# Random Crop Generating Functions for testset "get_random_crop_testset" and trainset "get_random_crop_trainset"
 # Calculations needed are different, thus two different functions. 
 # But both function will output the same data structure for easier to management of data in the pipeline.
-def get_random_crop_coor_trainset(rgb_base_array,thermal_base_array, crop_size = 1536, patch_size = 512):
+def get_random_crop_trainset(rgb_base_array,thermal_base_array, crop_size = 1536, patch_size = 512, blend_ratio = 0.5):
     """
-        Given two base images and patch and crop sizes (rgb, thermal, crop_size, patch_size)
+        Given two base images, patch and crop sizes (rgb, thermal, crop_size, patch_size)
         generates random rgb_crop with crop_size, and a random thermal_patch with patch_size
-    
-        returns all coordinates that can be used to generate crops.
+
+        returns crop, patch and all coordinates used to generate crops.
     """
+    # Get height and width
     h, w, _ = rgb_base_array.shape
-    
+
+    # Select a random top and left position for the crop.
     rgb_random_top = rng.integers(0, h - crop_size)
     rgb_random_left = rng.integers(0, w - crop_size)
-    
+
+    # Select a random top and left position for the thermal patch within the crop
     patch_random_top = rng.integers(0, crop_size - patch_size)
     patch_random_left = rng.integers(0, crop_size - patch_size)
-    
-    # local center in rgb_crop (convention used x,y!)
+
+    # Calculate patch local center in rgb_crop (convention used x,y!)
     patch_rgb_crop_local_center = (patch_random_left + patch_size // 2 , patch_random_top + patch_size // 2)
     patch_rgb_base_center = rgb_random_left + patch_rgb_crop_local_center[0], rgb_random_top + patch_rgb_crop_local_center[1]
-    
-    
+
+    # Calcuate crop global coordinates
     crop_top = rgb_random_top
     crop_bottom = rgb_random_top + crop_size
     crop_left = rgb_random_left
     crop_right = rgb_random_left + crop_size
-    
+
+    # calculate patch global coordinates
     patch_top = crop_top + patch_random_top 
     patch_bottom = crop_top + patch_random_top + patch_size
     patch_left = crop_left + patch_random_left
     patch_right = crop_left + patch_random_left + patch_size
+
+    # get rgb crop
+    rgb_crop = rgb_base_array[crop_top:crop_bottom,crop_left:crop_right]
+
+    # get thermal crop usging global patch coordinates.
+    thermal_patch = thermal_base_array[patch_top:patch_bottom, patch_left:patch_right] 
     
+    # Overlay the thermal patch on the cropped RGB image
+    overlay = rgb_crop.copy()
+    overlay[
+        patch_random_top:patch_random_top + patch_size,
+        patch_random_left:patch_random_left + patch_size
+    ] = (1-blend_ratio) * overlay[
+        patch_random_top:patch_random_top + patch_size,
+        patch_random_left:patch_random_left + patch_size
+    ] + blend_ratio * thermal_patch  # Directly blend the RGB thermal patch
+
 
     return {
+        "rgb_crop": rgb_crop, 
+        "thermal_patch":thermal_patch, 
         "patch_center_base":patch_rgb_base_center, 
         "patch_center_crop":patch_rgb_crop_local_center,
         "patch_base_top": patch_top,
         "patch_base_left": patch_left,
-        "patch_base_bottom": patch_bottom, 
-        "patch_base_right":patch_right,
         "rgb_base_top": crop_top,
         "rgb_base_left": crop_left,
-        "rgb_base_bottom": crop_bottom,
-        "rgb_base_right": crop_right,
         "patch_crop_top": patch_random_top,
         "patch_crop_left": patch_random_left,
-        "crop_size": crop_size,
-        "patch_size": patch_size
-    }
+        "overlay":overlay}
 
-def get_random_crop_coor_testset(center, 
+def get_random_crop_testset(center, 
                              rgb_base_array, 
                              thermal_patch, 
                              thermal_patch_size = 512, 
-                             crop_size = 1536):
+                             crop_size = 1536, 
+                             blend_ratio=0.5):
     """
     Generates random crops from rgb base with their associated thermal patches in test dataset given the center (x, y)
 
-    returns all coordinates that can be used to generate crops.
+    return crop, patch and all coordinates used to generate crops.
     """
     # Get height and width
     h, w, _ = rgb_base_array.shape
     # This is the center within the rgb_base (convention used in the dataset is x,y, not y,x!)
     center_x, center_y = center
     
-    # Dimensions of the thermal patch
+    # Get thermal patch global coordinates
     thermal_top = center_y - thermal_patch_size // 2
     thermal_bottom = center_y + thermal_patch_size // 2
     thermal_left = center_x - thermal_patch_size // 2
@@ -95,101 +111,42 @@ def get_random_crop_coor_testset(center,
     # Sample random top and left ensuring the thermal patch is included
     top = rng.integers(top_min, top_max + 1)
     left = rng.integers(left_min, left_max + 1)
-    bottom = top + crop_size
-    right = left + crop_size
     
+    # Extract the cropped RGB image
+    rgb_crop = rgb_base_array[top:top + crop_size, left:left + crop_size]
+
+    # Overlay the thermal patch on the cropped RGB image
+    overlay = rgb_crop.copy()
+
     # Define the location of the thermal patch in the cropped RGB coordinates
     thermal_top_in_crop = thermal_top - top
     thermal_left_in_crop = thermal_left - left
     
+    # Create Overlays
+    overlay[
+        thermal_top_in_crop:thermal_top_in_crop + thermal_patch_size,
+        thermal_left_in_crop:thermal_left_in_crop + thermal_patch_size,
+        :
+    ] = (1-blend_ratio) * overlay[
+        thermal_top_in_crop:thermal_top_in_crop + thermal_patch_size,
+        thermal_left_in_crop:thermal_left_in_crop + thermal_patch_size,
+        :
+    ] + blend_ratio * thermal_patch  # Directly blend the RGB thermal patch
+
         
     return {
+        "rgb_crop": rgb_crop, 
+        "thermal_patch":thermal_patch, 
         "patch_center_base":center, 
         "patch_center_crop": (thermal_left_in_crop + thermal_patch_size // 2 , thermal_top_in_crop + thermal_patch_size // 2),
         "patch_base_top": thermal_top,
         "patch_base_left": thermal_left,
-        "patch_base_bottom": thermal_bottom,
-        "patch_base_right": thermal_right, 
         "rgb_base_top": top,
         "rgb_base_left": left,
-        "rgb_base_bottom": bottom,
-        "rgb_base_right": right,
         "patch_crop_top": thermal_top_in_crop,
         "patch_crop_left": thermal_left_in_crop,
-        "crop_size": crop_size,
-        "patch_size": thermal_patch_size,
+        "overlay":overlay
     }
-
-def get_sample_images_trainset(rgb_base_array, thermal_base_array, item_dict, blend_ratio = 0.5):
-    """
-    given an sample item dict, returns rgb_crop, thermal_patch, overlay
-    """
-    # Get coordinates of rgb_crop from item dict
-    crop_top = item_dict["rgb_base_top"]
-    crop_bottom = item_dict["rgb_base_bottom"]
-    crop_left = item_dict["rgb_base_left"]
-    crop_right = item_dict["rgb_base_right"]
-
-    # get coordinates of thermal_patch from item dict
-    patch_top = item_dict["patch_base_top"]
-    patch_bottom = item_dict["patch_base_bottom"]
-    patch_left = item_dict["patch_base_left"]
-    patch_right = item_dict["patch_base_right"]
-    patch_size = item_dict["patch_size"]
-    patch_crop_top = item_dict["patch_crop_top"]
-    patch_crop_left = item_dict["patch_crop_left"]
-
-    
-    rgb_crop = rgb_base_array[crop_top:crop_bottom,crop_left:crop_right]
-    thermal_patch = thermal_base_array[patch_top:patch_bottom, patch_left:patch_right] 
-    
-    # Overlay the thermal patch on the cropped RGB image
-    overlay = rgb_crop.copy()
-    
-    # Ensure the thermal patch fits within the cropped RGB area
-    overlay[
-        patch_crop_top:patch_crop_top + patch_size ,
-        patch_crop_left:patch_crop_left + patch_size
-    ] = (1-blend_ratio) * overlay[
-        patch_crop_top:patch_crop_top + patch_size ,
-        patch_crop_left:patch_crop_left + patch_size
-    ] + blend_ratio * thermal_patch  # Directly blend the RGB thermal patch
-
-    return rgb_crop, thermal_patch, overlay
-    
-def get_sample_images_testset(rgb_base_array, thermal_patch, item_dict, blend_ratio = 0.5):
-    """
-    given an sample item dict, returns rgb_crop, thermal_patch, overlay
-    """
-    
-    # Get coordinates of rgb_crop from item dict
-    crop_top = item_dict["rgb_base_top"]
-    crop_bottom = item_dict["rgb_base_bottom"]
-    crop_left = item_dict["rgb_base_left"]
-    crop_right = item_dict["rgb_base_right"]
-
-    # get coordinates of thermal_patch from item dict
-    thermal_top_in_crop = item_dict["patch_crop_top"]
-    thermal_left_in_crop = item_dict["patch_crop_left"]
-    thermal_patch_size = item_dict["patch_size"]
-
-    # Extract the cropped RGB image
-    rgb_crop = rgb_base_array[crop_top:crop_bottom,crop_left:crop_right]
-
-    # Overlay the thermal patch on the cropped RGB image
-    overlay = rgb_crop.copy()
-    overlay[
-        thermal_top_in_crop:thermal_top_in_crop + thermal_patch_size,
-        thermal_left_in_crop:thermal_left_in_crop + thermal_patch_size,
-        :
-    ] = (1-blend_ratio) * overlay[
-        thermal_top_in_crop:thermal_top_in_crop + thermal_patch_size,
-        thermal_left_in_crop:thermal_left_in_crop + thermal_patch_size,
-        :
-    ] + blend_ratio * thermal_patch  # Directly blend the RGB thermal patch
-
-    return rgb_crop, thermal_patch, overlay
-    
 
 # Pytorch dataset objects for trainset as well as testset. 
 # Init functions differ, thus two different dataset class.
@@ -203,9 +160,9 @@ class Trainset(Dataset):
                  thermal_tranforms=None, 
                  patch_size=512, 
                  crop_size=1536):
-        # Get image Convert RGB PIL image to numpy array
-        self.rgb_base_array = np.array(Image.open(rgb_base_path).convert("RGB"))
-        self.thermal_base_array = np.array(Image.open(thermal_base_path).convert("RGB")) 
+        # Get image
+        self.rgb_base = Image.open(rgb_base_path).convert("RGB")
+        self.thermal_base = Image.open(thermal_base_path).convert("RGB")
         # Get sizes
         self.crop_size = crop_size
         self.patch_size = patch_size
@@ -223,42 +180,30 @@ class Trainset(Dataset):
         return self.num_samples
 
     def _getsamples(self):
-        # Iteratively generate random crop coordinates from the base images, and store them in samples.
+        # Convert RGB PIL image to numpy array
+        rgb_base_array = np.array(self.rgb_base)
+        thermal_base_array = np.array(self.thermal_base) 
+        
+        # Iteratively generate random crops from the base images.
         for item in range(self.num_samples):
-            self.samples.append(get_random_crop_coor_trainset(self.rgb_base_array, 
-                                                         self.thermal_base_array, 
+            self.samples.append(get_random_crop_trainset(rgb_base_array, 
+                                                         thermal_base_array, 
                                                          self.crop_size, 
                                                          self.patch_size)
                                )    
-
     def __getitem__(self,idx):
-        if isinstance(idx, slice):
-            # Process the slice and return a list of items
-            return [self.__getitem__(i) for i in range(*idx.indices(len(self.samples)))]
-        elif isinstance(idx, int):
-            # Process single index as usual
-            item = self.samples[idx]
-    
-            # lazily creating images here to avoid high memory overhead
-            rgb_crop, thermal_patch, overlay = get_sample_images_trainset(self.rgb_base_array, self.thermal_base_array, item)
-    
-            # Deep copy item to avoid increasing dataset object memory usage
-            item_to_return = deepcopy(item)
+        item = self.samples[idx]
+        
+        # Apply rgb image transformations if applies (maybe contrast enhancement etc..)
+        if self.rgb_transforms:
+            item = self.rgb_transforms(item)
             
-            item_to_return["rgb_crop"] = rgb_crop
-            item_to_return["thermal_patch"] = thermal_patch
-            item_to_return["overlay"] = overlay
-            
-            # Apply rgb image transformations if applies (maybe contrast enhancement etc..)
-            if self.rgb_transforms:
-                item_to_return = self.rgb_transforms(item_to_return)
-                
-            # Apply thermal patch transformations if applied (Homography transformations)
-            if self.thermal_tranforms:
-                # Necessary coordinate transformations will be inside thermal_transforms pipeline.
-                item_to_return = self.thermal_tranforms(item_to_return)
-    
-            return item_to_return
+        # Apply thermal patch transformations if applied (Homography transformations)
+        if self.thermal_tranforms:
+            # Necessary coordinate transformations will be inside thermal_transforms pipeline.
+            item = self.thermal_tranforms(item)
+
+        return item
 
 
 class Testset(Dataset):
@@ -271,8 +216,8 @@ class Testset(Dataset):
                  thermal_tranforms=None, 
                  patch_size=512, 
                  crop_size=1536):
-        # Get Image and Convert RGB PIL image to numpy array
-        self.rgb_base_array = np.array(Image.open(rgb_base_path).convert("RGB"))
+        # Get image
+        self.rgb_base = Image.open(rgb_base_path).convert("RGB")
         # get thermal patches
         self.thermal_patches = thermal_patches
         # get number of samples to generate
@@ -294,51 +239,33 @@ class Testset(Dataset):
         return self.num_samples
 
     def _getsamples(self):
+        # Convert RGB PIL image to numpy array
+        rgb_base_array = np.array(self.rgb_base)
         # Iteratively generate random crops from the base images.
         for item in range(self.num_samples):
             # Randomly select a center to generate thermal patch with a random rgb crop.
             idx = rng.integers(0,len(self.centers))
-            item = get_random_crop_coor_testset(self.centers[idx],
-                                                        self.rgb_base_array, 
+            self.samples.append(get_random_crop_testset(self.centers[idx],
+                                                        rgb_base_array, 
                                                         self.thermal_patches[idx], 
                                                         thermal_patch_size = self.patch_size, 
                                                         crop_size = self.crop_size)
-            item["item_id"] = idx
-            self.samples.append(item)    
-            
+                               )    
     def __getitem__(self,idx):
-        if isinstance(idx, slice):
-            # Process the slice and return a list of items
-            return [self.__getitem__(i) for i in range(*idx.indices(len(self.samples)))]
-        elif isinstance(idx, int):
-            # Process single index as usual
-            item = self.samples[idx]
-    
-            # lazily creating images here to avoid high memory overhead
-            rgb_crop, thermal_patch, overlay = get_sample_images_testset(self.rgb_base_array, self.thermal_patches[item["item_id"]], item)
-    
-            # Deep copy item to avoid increasing dataset object memory requirements. 
-            item_to_return = deepcopy(item)
-            
-            item_to_return["rgb_crop"] = rgb_crop
-            item_to_return["thermal_patch"] = thermal_patch
-            item_to_return["overlay"] = overlay
-            
-            del item_to_return["item_id"] # not needed at output.
-            
-            # Apply rgb image transformations if applies (maybe contrast enhancement etc..)
-            if self.rgb_transforms:
-                item_to_return = self.rgb_transforms(item_to_return)
-            # Apply thermal patch transformations if applied (Homography transformations)
-            if self.thermal_tranforms:
-                # Necessary coordinate transformations will be inside thermal_transforms pipeline.
-                item_to_return = self.thermal_tranforms(item_to_return)
-    
-            return item_to_return
+        item = self.samples[idx]
+        # Apply rgb image transformations if applies (maybe contrast enhancement etc..)
+        if self.rgb_transforms:
+            item = self.rgb_transforms(item)
+        # Apply thermal patch transformations if applied (Homography transformations)
+        if self.thermal_tranforms:
+            # Necessary coordinate transformations will be inside thermal_transforms pipeline.
+            item = self.thermal_tranforms(item)
+
+        return item
 
 if __name__ == '__main__':
     # if running as a script, call functions and dataset & dataloader objects for testing purposes.
-    # shows figues in a blocking manner, one windows at a time.
+    # shows figues in a blocking manner, one by one.
     import matplotlib.pyplot as plt
 
     print("Loading uav.pkl")
@@ -359,6 +286,20 @@ if __name__ == '__main__':
     thermal_zone1_array = np.array(thermal_zone1)
     rgb_zone2_array = np.array(rgb_zone2)
 
+    # Set seed.
+    rng = np.random.default_rng(seed = 0)
+    item = get_random_crop_trainset(rgb_zone1_array,thermal_zone1_array)
+    plt.figure()
+    plt.imshow(item["overlay"])
+    plt.title("get_random_crop_trainset function test")
+    plt.show()
+
+    item = get_random_crop_testset(centers[434],rgb_zone2_array, thermal_patches[434])
+    plt.figure()
+    plt.imshow(item["overlay"])
+    plt.title("get_random_crop_test function test")
+    plt.show()
+    
     #set random seeds for cropping as well as shuffling
     torch.manual_seed(0) # for dataloader reproducibility 
     rng = np.random.default_rng(seed = 0) # for cropping reproducibility
