@@ -12,17 +12,24 @@ The code is written and tested in Windows 11 Pro OS.
 
 Python version: 3.12.7
 
+Pip version: 24.3.1
+
 Pytorch Version : 2.5.1+cu121
 
 
 Create a virtual environment and activate it.
-Then, clone this repo:
+Then follow the below commands in order.
 
 ```
 git clone https://github.com/ubeydemavus/tii-assignment.git
 cd tii-assignment
-
-pip intall -r requirements.txt
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 
+git clone https://github.com/cvg/LightGlue.git && cd LightGlue
+python -m pip install -e . & cd ..
+pip install joblib
+pip install jupyterlab
+pip install tqdm
+mkdir datasets
 ```
 
 Copy the "rgb_zone1.png", "rgb_zone2.png", "thermal_zone1.png" and "uav.pkl" files into `datasets/` folder. (They are not pushed to the repo. Make sure to use correct version of "rgb_zone1.png" and "thermal_zone1.png" files.) 
@@ -31,7 +38,7 @@ using `jupyter lab` command, you can start jupyter server.
 
 
 # Approach
-The assignment involves generating datasets using multiple RGB base maps, a thermal base map and pre-copped thermal patches. A 1536x1536 px random crop from an RGB base map is matched with a 512x512 px random thermal patch from the same area via the thermal base map. This combined pair is used as the training set for the final neural network architecture.
+The assignment involves generating datasets using multiple RGB base maps, a thermal base map and pre-cropped thermal patches. A 1536x1536 px random crop from an RGB base map is matched with a 512x512 px random thermal patch from the same area via the thermal base map. This combined pair is used as the training set for the final neural network architecture.
 
 Additionally, an RGB base map with pre-cropped thermal patches is provided. A separate training set is created from this map as well.
 
@@ -42,7 +49,7 @@ Afterwards, a cross-attention transformer model is trained to predict the center
 Finally results are reported for the baseline, the intermediate models, as well as the final center prediction pipeline as the average euclidian distance between the centers in pixels. 
 
 # Datasets
-The datasets are created on demand lazily via random number generation. This allows to use the same dataset class multiple times with different seeds without changing anything else while keeping the RAM and DISK usage small. The generated datasets only depend on the random number seed as well as the base maps. If the inputs to the dataset object is the same, the generated dataset will be the same every time.
+The datasets are created on demand lazily via random number generation. This allows to use the same dataset class multiple times with different seeds without changing anything else while keeping the RAM and DISK usage small. The generated datasets only depend on the random number seed, number of samples to generate as well as the base maps. If the inputs to the dataset object is the same, the generated dataset will be the same every time.
 
 The code for the dataset classes reside in "[datasets.py](./datasets.py)" file.
 
@@ -116,7 +123,7 @@ Experiments performed five times, each time 5000 samples are used.
 A short description of DISK from the paper:
 > DISK (DIScrete Keypoints) is a novel method for local feature matching that addresses the challenges of learning in an end-to-end fashion by using Reinforcement Learning (RL) principles. It optimizes for a high number of correct feature matches while maintaining a simple, probabilistic model that ensures good convergence for reliable training. DISK allows for dense yet discriminative feature extraction, challenging traditional assumptions about keypoint quality, and achieves state-of-the-art performance on three public benchmarks.
 
-Experiiments performed five times, each time 5000 samples are used.
+Experiments performed five times, each time 5000 samples are used.
 
     Extractor: DISK
     Metrics Across All Experiments Across All Patches:
@@ -136,7 +143,7 @@ Experiiments performed five times, each time 5000 samples are used.
 A short description of ALIKED from the paper:
 > ALIKED introduces the Sparse Deformable Descriptor Head (SDDH), a method that enhances keypoint and descriptor extraction by learning deformable positions of supporting features for each keypoint. Unlike traditional dense descriptor maps, SDDH extracts sparse yet highly expressive descriptors, improving efficiency. The method also modifies the neural reprojection error (NRE) loss to work with sparse descriptors, enabling better performance in tasks like image matching, 3D reconstruction, and visual relocalization. Experimental results demonstrate its efficiency and effectiveness across various visual measurement tasks.
 
-Experiiments performed five times, each time 5000 samples are used.
+Experiments performed five times, each time 5000 samples are used.
 
     Extractor: ALIKED
     Metrics Across All Experiments Across All Patches:
@@ -174,21 +181,21 @@ The model comprises three distinct stages:
    - The transformer computes attention weights by evaluating the similarity between the RGB crop's query and the thermal patch's key. These weights are used to aggregate the corresponding values, forming the "attended" representation.
 
 3. **Regression Head**  
-   Averages the attended high-dimensional keypoint representations and performs regression to predict the center coordinates.
+   Averages the attended high-dimensional representations and performs regression to predict the center coordinates.
 
-This mechanism effectively aligns RGB and thermal data by leveraging the transformer’s attention to identify correspondences between the two modalities.
+This mechanism effectively aligns RGB and thermal data by leveraging the transformer's attention to identify correspondences between the two images.
 
 ## Training
-The Cross-Attention Center Estimator is trained with 5000 image pairs from trainset for 200 epochs with a batch number of 32, a learning rate of 0.001, using adam optimizer and a learning rate scheduler. The transformer has two layers with four attention heads in each layer. The keypoint embeddings has 128 dimensions. The regression head have 2 fully connected layers. The model has been trained with a Nvidia RTX 4090 24 GB gpu. 
+The Cross-Attention Center Estimator is trained with 5000 image pairs from trainset for 200 epochs with a batch number of 32, a learning rate of 0.001, using adam optimizer and a learning rate scheduler. The transformer has two layers with four attention heads in each layer. The keypoint embeddings have 128 dimensions. The regression head have 2 fully connected layers. The model has been trained with a Nvidia RTX 4090 24 GB gpu. 
 
 The code for the model reside in "[CrossAttentionCenterEstimator.py](./CrossAttentionCenterEstimator.py)"
 
 The code for training the model as well as testing reside in "[aliked+lightglue+centerEstimator.ipynb](./aliked+lightglue+centerEstimator.ipynb)"
 
-## Testing
-Testing performed 5 times with 5000 sample image pairs from testset. The results for each experiment as well as the results across experiments can be found in "[aliked+lightglue+centerEstimator.ipynb](./aliked+lightglue+centerEstimator.ipynb)"
+## Evaluation
+Testing is performed 5 times with 5000 sample image pairs from testset. The results for each experiment as well as the results across experiments can be found in "[aliked+lightglue+centerEstimator.ipynb](./aliked+lightglue+centerEstimator.ipynb)"
 
-For each individual experiment please refer to the .ipynb file.
+For each individual experiment results please refer to the .ipynb file.
 
 Results across experiments for the trained model: 
 
