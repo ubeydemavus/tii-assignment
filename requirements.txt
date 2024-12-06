@@ -34,8 +34,6 @@ filelock==3.13.1
 fonttools==4.55.0
 fqdn==1.5.1
 fsspec==2024.2.0
-# Editable install with no version control (gluefactory==0.0)
--e d:\win_codebase\cb_rgb_ir_matching\glue-factory
 grpcio==1.68.1
 h11==0.14.0
 h5py==3.12.1
